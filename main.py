@@ -23,9 +23,9 @@ class DrinkCheckBot(commands.Bot):
         )
         
         # Initialize our tracking systems
-        self.drink_check_tracker = DrinkCheckTracker()
-        self.stats_manager = StatsManager()
         self.database = Database()
+        self.drink_check_tracker = DrinkCheckTracker(database=self.database)
+        self.stats_manager = StatsManager()
 
     async def on_ready(self):
         # Bot just connected to Discord
@@ -34,6 +34,14 @@ class DrinkCheckBot(commands.Bot):
         for guild in self.guilds:
             print(f"  - {guild.name} (id: {guild.id})")
         await self.database.initialize()
+        
+        # Sync commands after bot is ready
+        print("Syncing slash commands...")
+        try:
+            synced = await self.tree.sync()
+            print(f"Synced {len(synced)} command(s)")
+        except Exception as e:
+            print(f"Error syncing commands: {e}")
         
     async def on_message(self, message):
         # Every message in Discord goes through here
@@ -45,7 +53,7 @@ class DrinkCheckBot(commands.Bot):
             await self.drink_check_tracker.track_new_drink_check(message)
             
         # Check if this is a response to a drink check
-        response_to = self.drink_check_tracker.is_response_to_drink_check(message)
+        response_to = await self.drink_check_tracker.is_response_to_drink_check(message)
         if response_to:
             await self.drink_check_tracker.track_response(message, response_to)
             
@@ -54,18 +62,10 @@ class DrinkCheckBot(commands.Bot):
 
     async def setup_hook(self):
         # Load all our command modules
+        print("Loading command cogs...")
         await self.add_cog(StatsCommands(self))
         await self.add_cog(AdminCommands(self))
-
-        # Sync the slash commands
-        await self.tree.sync()
-        
-    # Commands like /stats, /leaderboard get routed here
-    @app_commands.command(name="stats", description="Get your drink check stats")
-    async def stats(self, interaction: discord.Interaction, user: discord.Member = None):
-        user = user or interaction.user
-        stats = await self.stats_manager.get_user_stats(user.id)
-        await interaction.response.send_message(f"Stats for {user.name}: {stats}")
+        print("Command cogs loaded successfully")
 
 # Create and run the bot
 async def main():
