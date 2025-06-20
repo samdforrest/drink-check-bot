@@ -8,8 +8,8 @@ class DrinkCheckTracker:
         self.tracked_channels = TRACKED_CHANNELS  # Use channels from config
         self.database = database
         
-    def is_drink_check(self, content: str) -> bool:
-        # Check if message contains drink check keywords
+    def is_drink_check(self, content: str, message=None) -> bool:
+        # Check if message contains drink check keywords AND has a file attachment
         # Convert to lowercase and removes any leading/trailing whitespace
         content_lower = content.lower().strip()
         
@@ -24,7 +24,16 @@ class DrinkCheckTracker:
                 "d c",
             ])
         
-        return any(variation in content_lower for variation in variations)
+        # Check if content contains drink check keywords
+        has_keywords = any(variation in content_lower for variation in variations)
+        
+        # Check if message has file attachments
+        has_attachment = False
+        if message and message.attachments:
+            has_attachment = len(message.attachments) > 0
+        
+        # Both conditions must be true: keywords AND attachment
+        return has_keywords and has_attachment
         
     async def is_response_to_drink_check(self, message) -> Optional[int]:
         # Check if message is a reply to a tracked drink check
@@ -40,6 +49,10 @@ class DrinkCheckTracker:
     async def track_new_drink_check(self, message):
         # Store new drink check in database
         print(f"New drink check detected: {message.content} by {message.author.name}")
+        if message.attachments:
+            print(f"  - Has {len(message.attachments)} attachment(s)")
+            for i, attachment in enumerate(message.attachments):
+                print(f"    Attachment {i+1}: {attachment.filename} ({attachment.content_type})")
         
         if self.database:
             drink_check_id = await self.database.save_drink_check(

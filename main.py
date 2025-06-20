@@ -48,8 +48,8 @@ class DrinkCheckBot(commands.Bot):
         if message.author.bot:  # Ignore other bots
             return
             
-        # Check if this is a drink check
-        if self.drink_check_tracker.is_drink_check(message.content):
+        # Check if this is a drink check (with attachment requirement)
+        if self.drink_check_tracker.is_drink_check(message.content, message):
             await self.drink_check_tracker.track_new_drink_check(message)
             
         # Check if this is a response to a drink check
