@@ -1,0 +1,1 @@
+#main bot class and setup
