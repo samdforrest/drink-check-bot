@@ -4,7 +4,8 @@ from discord.ext import commands
 from discord import app_commands
 from database.models import User, DrinkCheck, Credit
 from database.connection import DatabaseSession
-from sqlalchemy import func
+from sqlalchemy import func, text
+from datetime import datetime, timedelta
 import logging
 
 # Set up logging
@@ -46,7 +47,46 @@ class StatsCommands(commands.Cog):
                     .filter_by(user_id=target_user.id, credit_type='chain')\
                     .scalar() or 0
 
-                logger.info(f"Stats for {target_user.name}: initial={initial_dcs}, chain={chain_dcs}")
+                # Get today's drink checks
+                today = datetime.utcnow().date()
+                today_start = datetime.combine(today, datetime.min.time())
+                today_end = datetime.combine(today, datetime.max.time())
+                
+                today_dcs = db.query(func.count(DrinkCheck.message_id))\
+                    .filter(
+                        DrinkCheck.user_id == target_user.id,
+                        DrinkCheck.timestamp >= today_start,
+                        DrinkCheck.timestamp <= today_end
+                    ).scalar() or 0
+
+                # Get yesterday's drink checks
+                yesterday = today - timedelta(days=1)
+                yesterday_start = datetime.combine(yesterday, datetime.min.time())
+                yesterday_end = datetime.combine(yesterday, datetime.max.time())
+                
+                yesterday_dcs = db.query(func.count(DrinkCheck.message_id))\
+                    .filter(
+                        DrinkCheck.user_id == target_user.id,
+                        DrinkCheck.timestamp >= yesterday_start,
+                        DrinkCheck.timestamp <= yesterday_end
+                    ).scalar() or 0
+
+                # Get highest daily count using SQLite's date() function
+                daily_counts = db.query(
+                    func.strftime('%Y-%m-%d', DrinkCheck.timestamp).label('date'),
+                    func.count(DrinkCheck.message_id).label('count')
+                ).filter(
+                    DrinkCheck.user_id == target_user.id
+                ).group_by(
+                    func.strftime('%Y-%m-%d', DrinkCheck.timestamp)
+                ).order_by(
+                    func.count(DrinkCheck.message_id).desc()
+                ).first()
+
+                highest_daily = daily_counts[1] if daily_counts else 0
+                highest_date = daily_counts[0] if daily_counts else None
+
+                logger.info(f"Stats for {target_user.name}: initial={initial_dcs}, chain={chain_dcs}, today={today_dcs}")
 
                 # Create embed
                 embed = discord.Embed(
@@ -71,6 +111,32 @@ class StatsCommands(commands.Cog):
                     value=f"⛓️ {chain_dcs}",
                     inline=True
                 )
+
+                # Add daily stats section
+                embed.add_field(
+                    name="\u200b",  # Empty field for spacing
+                    value="\u200b",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="Today's Drink Checks",
+                    value=f"📅 {today_dcs}",
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="Yesterday's Drink Checks",
+                    value=f"📅 {yesterday_dcs}",
+                    inline=True
+                )
+
+                if highest_date:
+                    embed.add_field(
+                        name="Most Active Day",
+                        value=f"🏆 {highest_daily} checks on {highest_date}",
+                        inline=False
+                    )
                 
                 # Add user avatar
                 embed.set_thumbnail(url=target_user.display_avatar.url)
@@ -80,6 +146,7 @@ class StatsCommands(commands.Cog):
         except Exception as e:
             logger.error(f"Error in profile command: {e}")
             await interaction.response.send_message("Error getting profile information.", ephemeral=True)
+            raise  # Add this to see the full error trace in logs
     
     @app_commands.command(name="leaderboard", description="View the drink check leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
