@@ -2,7 +2,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from database.models import User, DrinkCheck, Credit
+from database.models import User, DrinkCheck, Credit, ActiveChain
 from database.connection import DatabaseSession
 from sqlalchemy import func, text
 from datetime import datetime, timedelta
@@ -204,6 +204,86 @@ class StatsCommands(commands.Cog):
         except Exception as e:
             logger.error(f"Error in leaderboard command: {e}", exc_info=True)
             await interaction.response.send_message("Error getting leaderboard.", ephemeral=True)
+
+    @app_commands.command(name="timer", description="Check how much time is left in the current drink check chain")
+    async def timer(self, interaction: discord.Interaction):
+        """Check the status of the current chain and how much time is left"""
+        try:
+            logger.info("Checking chain timer")
+            with DatabaseSession() as db:
+                # Get active chain
+                active_chain = db.query(ActiveChain)\
+                    .filter_by(is_active=True)\
+                    .order_by(ActiveChain.start_time.desc())\
+                    .first()
+                
+                if not active_chain:
+                    await interaction.response.send_message("🕒 No active chain right now! Start one with a drink check.", ephemeral=True)
+                    return
+                
+                # Get current time in UTC since our timestamps are in UTC
+                now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+                
+                # Convert chain timestamps to Central Time for display
+                start_time_ct = active_chain.start_time.astimezone(central)
+                last_activity_ct = active_chain.last_activity.astimezone(central)
+                
+                # Calculate time difference
+                last_activity_utc = active_chain.last_activity.replace(tzinfo=pytz.UTC)
+                time_diff = now - last_activity_utc
+                minutes_left = 30 - (time_diff.total_seconds() / 60)
+                
+                # Get starter's username
+                starter = db.query(User).filter_by(user_id=active_chain.starter_id).first()
+                starter_name = starter.username if starter else "Unknown"
+                
+                # Get last message author's username
+                last_author = db.query(User).filter_by(user_id=active_chain.last_message_author_id).first()
+                last_author_name = last_author.username if last_author else "Unknown"
+                
+                # Create embed
+                embed = discord.Embed(
+                    title="⏱️ Chain Timer Status",
+                    color=discord.Color.blue() if minutes_left > 5 else discord.Color.red()
+                )
+                
+                # Add chain info
+                embed.add_field(
+                    name="Chain Starter",
+                    value=f"👑 {starter_name}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Last Activity By",
+                    value=f"🎯 {last_author_name}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Time Left",
+                    value=f"⏰ {minutes_left:.1f} minutes" if minutes_left > 0 else "⚠️ Chain expired!",
+                    inline=False
+                )
+                
+                embed.add_field(
+                    name="Chain Started (CT)",
+                    value=f"📅 {start_time_ct.strftime('%I:%M:%S %p')}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Last Activity (CT)",
+                    value=f"📅 {last_activity_ct.strftime('%I:%M:%S %p')}",
+                    inline=True
+                )
+                
+                await interaction.response.send_message(embed=embed)
+                
+        except Exception as e:
+            logger.error(f"Error in timer command: {e}")
+            await interaction.response.send_message("Error checking chain timer.", ephemeral=True)
+            raise
 
 async def setup(bot):
     await bot.add_cog(StatsCommands(bot))
