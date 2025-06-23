@@ -5,11 +5,15 @@ from database.models import User, DrinkCheck, Credit, ActiveChain
 from database.connection import DatabaseSession
 from bot.trackers import DrinkCheckTracker
 from datetime import datetime
+import pytz
 import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set up Central timezone
+central = pytz.timezone('America/Chicago')
 
 class MessageEvents(commands.Cog):
     def __init__(self, bot):
@@ -62,12 +66,16 @@ class MessageEvents(commands.Cog):
             .filter_by(is_active=True)\
             .update({"is_active": False})
         
-        # Create new chain
+        # Create new chain with current time in Central Time
+        now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+        
         new_chain = ActiveChain(
             starter_id=user_id,
             start_message_id=message_id,
             last_message_id=message_id,
-            last_message_author_id=user_id
+            last_message_author_id=user_id,
+            start_time=now,
+            last_activity=now
         )
         db.add(new_chain)
         db.commit()
@@ -85,12 +93,15 @@ class MessageEvents(commands.Cog):
                 # Check for active chain
                 active_chain = await self._get_active_chain(db)
                 
-                # Create drink check record
+                # Create drink check record with current time in Central Time
+                now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+                
                 drink_check = DrinkCheck(
                     message_id=message.id,
                     user_id=message.author.id,
                     is_reply=message.reference is not None,
-                    replied_to_message_id=message.reference.message_id if message.reference else None
+                    replied_to_message_id=message.reference.message_id if message.reference else None,
+                    timestamp=now
                 )
                 db.add(drink_check)
 
@@ -103,7 +114,8 @@ class MessageEvents(commands.Cog):
                     credit = Credit(
                         user_id=message.author.id,
                         message_id=message.id,
-                        credit_type='initial'
+                        credit_type='initial',
+                        timestamp=now
                     )
                     db.add(credit)
                     user.total_credits += 1
@@ -119,7 +131,8 @@ class MessageEvents(commands.Cog):
                     chain_credit = Credit(
                         user_id=message.author.id,
                         message_id=message.id,
-                        credit_type='chain'
+                        credit_type='chain',
+                        timestamp=now
                     )
                     db.add(chain_credit)
                     user.total_credits += 1
@@ -132,7 +145,8 @@ class MessageEvents(commands.Cog):
                         starter_chain_credit = Credit(
                             user_id=starter.user_id,
                             message_id=message.id,
-                            credit_type='chain'
+                            credit_type='chain',
+                            timestamp=now
                         )
                         db.add(starter_chain_credit)
                         starter.total_credits += 1  # Only one point for chain participation
@@ -145,7 +159,7 @@ class MessageEvents(commands.Cog):
                     
                     # Only update last_activity (timer) if it's not a self-reply or same person
                     if not is_self_reply and not is_chain_starter:
-                        active_chain.last_activity = datetime.utcnow()
+                        active_chain.last_activity = now
                         logger.info("Chain timer reset")
                     else:
                         logger.info("Self-reply or starter drink check - timer not reset")

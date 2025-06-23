@@ -1,10 +1,19 @@
 #database models/schema
-from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, create_engine
+from sqlalchemy import Column, Integer, BigInteger, String, Boolean, DateTime, ForeignKey, create_engine, Enum as SQLEnum
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timedelta
+import pytz
+import enum
 
 Base = declarative_base()
+
+# Set up Central timezone
+central = pytz.timezone('America/Chicago')
+
+class CreditType(enum.Enum):
+    initial = 'initial'
+    chain = 'chain'
 
 class User(Base):
     __tablename__ = 'users'
@@ -25,10 +34,10 @@ class DrinkCheck(Base):
 
     message_id = Column(BigInteger, primary_key=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id'))
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    chain_id = Column(Integer, ForeignKey('active_chains.chain_id'), nullable=True)
     is_reply = Column(Boolean, default=False)
     replied_to_message_id = Column(BigInteger, nullable=True)
-    chain_id = Column(Integer, ForeignKey('active_chains.chain_id'), nullable=True)
+    timestamp = Column(DateTime(timezone=True))
     
     # Relationships
     user = relationship("User", back_populates="drink_checks")
@@ -44,8 +53,8 @@ class Credit(Base):
     credit_id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(BigInteger, ForeignKey('users.user_id'))
     message_id = Column(BigInteger, ForeignKey('drink_checks.message_id'))
-    credit_type = Column(String(50))  # 'initial' or 'chain'
-    timestamp = Column(DateTime, default=datetime.utcnow)
+    credit_type = Column(SQLEnum(CreditType))
+    timestamp = Column(DateTime(timezone=True))
     
     # Relationships
     user = relationship("User", back_populates="credits")
@@ -61,9 +70,9 @@ class ActiveChain(Base):
     starter_id = Column(BigInteger, ForeignKey('users.user_id'))  # User who started the chain
     start_message_id = Column(BigInteger, unique=True)  # First message in chain
     last_message_id = Column(BigInteger)  # Most recent message in chain
-    last_message_author_id = Column(BigInteger)  # Author of the last message
-    start_time = Column(DateTime, default=datetime.utcnow)
-    last_activity = Column(DateTime, default=datetime.utcnow)  # Last non-self-reply activity
+    last_message_author_id = Column(BigInteger, ForeignKey('users.user_id'))
+    start_time = Column(DateTime(timezone=True))
+    last_activity = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
     
     # Relationships
@@ -73,10 +82,15 @@ class ActiveChain(Base):
         return f"<ActiveChain(chain_id={self.chain_id}, starter_id={self.starter_id}, is_active={self.is_active})>"
 
     def is_expired(self):
-        """Check if chain has expired (30 minutes without activity)"""
-        if not self.is_active:
+        """Check if the chain has expired (30 minutes of inactivity)"""
+        if not self.last_activity:
             return True
+            
+        # Get current time in UTC since our timestamps are in UTC
+        now = datetime.utcnow().replace(tzinfo=pytz.UTC)
         
-        now = datetime.utcnow()
-        time_diff = now - self.last_activity
-        return time_diff.total_seconds() >= 1800  # 30 minutes in seconds
+        # Convert last_activity to UTC for comparison (if it's not already)
+        last_activity_utc = self.last_activity.replace(tzinfo=pytz.UTC) if self.last_activity.tzinfo is None else self.last_activity
+        
+        # Chain expires after 30 minutes of inactivity
+        return (now - last_activity_utc) > timedelta(minutes=30)

@@ -6,11 +6,15 @@ from database.models import User, DrinkCheck, Credit
 from database.connection import DatabaseSession
 from sqlalchemy import func, text
 from datetime import datetime, timedelta
+import pytz
 import logging
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Set up Central timezone
+central = pytz.timezone('America/Chicago')
 
 class StatsCommands(commands.Cog):
     def __init__(self, bot):
@@ -47,31 +51,43 @@ class StatsCommands(commands.Cog):
                     .filter_by(user_id=target_user.id, credit_type='chain')\
                     .scalar() or 0
 
-                # Get today's drink checks
-                today = datetime.utcnow().date()
-                today_start = datetime.combine(today, datetime.min.time())
-                today_end = datetime.combine(today, datetime.max.time())
+                # Get current time in Central Time
+                now = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(central)
+                today = now.date()
+                
+                # Create datetime ranges in Central Time
+                today_start = central.localize(datetime.combine(today, datetime.min.time()))
+                today_end = central.localize(datetime.combine(today, datetime.max.time()))
+                
+                # Convert back to UTC for database query
+                today_start_utc = today_start.astimezone(pytz.UTC)
+                today_end_utc = today_end.astimezone(pytz.UTC)
                 
                 today_dcs = db.query(func.count(DrinkCheck.message_id))\
                     .filter(
                         DrinkCheck.user_id == target_user.id,
-                        DrinkCheck.timestamp >= today_start,
-                        DrinkCheck.timestamp <= today_end
+                        DrinkCheck.timestamp >= today_start_utc,
+                        DrinkCheck.timestamp <= today_end_utc
                     ).scalar() or 0
 
                 # Get yesterday's drink checks
                 yesterday = today - timedelta(days=1)
-                yesterday_start = datetime.combine(yesterday, datetime.min.time())
-                yesterday_end = datetime.combine(yesterday, datetime.max.time())
+                yesterday_start = central.localize(datetime.combine(yesterday, datetime.min.time()))
+                yesterday_end = central.localize(datetime.combine(yesterday, datetime.max.time()))
+                
+                # Convert to UTC for database query
+                yesterday_start_utc = yesterday_start.astimezone(pytz.UTC)
+                yesterday_end_utc = yesterday_end.astimezone(pytz.UTC)
                 
                 yesterday_dcs = db.query(func.count(DrinkCheck.message_id))\
                     .filter(
                         DrinkCheck.user_id == target_user.id,
-                        DrinkCheck.timestamp >= yesterday_start,
-                        DrinkCheck.timestamp <= yesterday_end
+                        DrinkCheck.timestamp >= yesterday_start_utc,
+                        DrinkCheck.timestamp <= yesterday_end_utc
                     ).scalar() or 0
 
-                # Get highest daily count using SQLite's date() function
+                # Get highest daily count using SQLite's date() function and timezone conversion
+                # First convert the timestamp to Central Time using strftime
                 daily_counts = db.query(
                     func.strftime('%Y-%m-%d', DrinkCheck.timestamp).label('date'),
                     func.count(DrinkCheck.message_id).label('count')
@@ -120,20 +136,20 @@ class StatsCommands(commands.Cog):
                 )
 
                 embed.add_field(
-                    name="Today's Drink Checks",
+                    name="Today's Drink Checks (CT)",
                     value=f"📅 {today_dcs}",
                     inline=True
                 )
 
                 embed.add_field(
-                    name="Yesterday's Drink Checks",
+                    name="Yesterday's Drink Checks (CT)",
                     value=f"📅 {yesterday_dcs}",
                     inline=True
                 )
 
                 if highest_date:
                     embed.add_field(
-                        name="Most Active Day",
+                        name="Most Active Day (CT)",
                         value=f"🏆 {highest_daily} checks on {highest_date}",
                         inline=False
                     )

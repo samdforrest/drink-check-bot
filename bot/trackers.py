@@ -9,8 +9,26 @@ class DrinkCheckTracker:
         self.database = database
         
     def is_drink_check(self, content: str, message=None) -> bool:
-        # Check if message contains drink check keywords AND has a file attachment
-        # Convert to lowercase and removes any leading/trailing whitespace
+        """
+        Check if a message is a valid drink check. Valid cases:
+        1. Normal message: Must have "dc" (or variant) AND attachment
+        2. Reply: Must have attachment (with or without "dc")
+        """
+        # Early return if no message object
+        if not message:
+            return False
+
+        # Check if message has file attachments
+        has_attachment = len(message.attachments) > 0 if message.attachments else False
+        if not has_attachment:
+            return False  # No attachment = no drink check
+
+        # If it's a reply with an attachment, it's valid
+        is_reply = bool(message.reference)
+        if is_reply:
+            return True  # Replies with attachments are always valid
+
+        # For non-replies, check for drink check keywords
         content_lower = content.lower().strip()
         
         # Generate variations from the base keywords
@@ -27,12 +45,7 @@ class DrinkCheckTracker:
         # Check if content contains drink check keywords
         has_keywords = any(variation in content_lower for variation in variations)
         
-        # Check if message has file attachments
-        has_attachment = False
-        if message and message.attachments:
-            has_attachment = len(message.attachments) > 0
-        
-        # Both conditions must be true: keywords AND attachment
+        # For non-replies, need both keywords AND attachment
         return has_keywords and has_attachment
         
     async def is_response_to_drink_check(self, message) -> Optional[int]:
