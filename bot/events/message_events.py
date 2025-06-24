@@ -137,21 +137,7 @@ class MessageEvents(commands.Cog):
                     db.add(chain_credit)
                     user.total_credits += 1
                     
-                    if not is_chain_starter and not is_self_reply:
-                        # Award chain credit to starter (only if this is a different person)
-                        starter = await self._get_or_create_user(db, active_chain.starter_id, str(message.author))
-                        
-                        # Chain credit for starter
-                        starter_chain_credit = Credit(
-                            user_id=starter.user_id,
-                            message_id=message.id,
-                            credit_type='chain',
-                            timestamp=now
-                        )
-                        db.add(starter_chain_credit)
-                        starter.total_credits += 1  # Only one point for chain participation
-                        
-                        logger.info(f"Chain continued by {message.author.name}, awarded chain credit to starter {starter.username}")
+                    
                     
                     # Update chain's last message info
                     active_chain.last_message_id = message.id
