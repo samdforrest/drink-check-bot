@@ -7,6 +7,7 @@ from bot.trackers import DrinkCheckTracker
 from datetime import datetime
 import pytz
 import logging
+from typing import Dict, Set
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -19,30 +20,86 @@ class MessageEvents(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.tracker = DrinkCheckTracker()
+        # Add cache for users and allowed channels
+        self.user_cache: Dict[int, User] = {}
+        self.allowed_channels: Set[int] = set()
+        self.cache_timeout = 3600  # Cache timeout in seconds
+        self.last_cache_cleanup = datetime.utcnow()
+
+    async def setup_channels(self):
+        """Load allowed channels from settings"""
+        try:
+            from config.settings import TRACKED_CHANNELS
+            self.allowed_channels = set(TRACKED_CHANNELS)
+            logger.info(f"Loaded {len(self.allowed_channels)} tracked channels")
+        except ImportError:
+            logger.warning("No TRACKED_CHANNELS found in settings, all channels will be tracked")
+            self.allowed_channels = set()
+
+    def _should_process_message(self, message: Message) -> bool:
+        """Quick check if message should be processed"""
+        # Ignore bot messages
+        if message.author.bot:
+            logger.debug("Ignoring bot message")
+            return False
+            
+        # If no channel restrictions, process all
+        if not self.allowed_channels:
+            return True
+            
+        # Check if message is in allowed channel
+        is_allowed = message.channel.id in self.allowed_channels
+        if not is_allowed:
+            logger.debug(f"Channel {message.channel.id} not in tracked channels")
+        return is_allowed
+
+    def _cleanup_cache(self):
+        """Clean up expired cache entries"""
+        now = datetime.utcnow()
+        if (now - self.last_cache_cleanup).total_seconds() > 3600:  # Cleanup every hour
+            logger.info("Cleaning up user cache")
+            self.user_cache.clear()
+            self.last_cache_cleanup = now
 
     @commands.Cog.listener()
     async def on_message(self, message: Message):
-        # Ignore bot messages
-        if message.author.bot:
-            return
+        try:
+            # Quick early return if message shouldn't be processed
+            if not self._should_process_message(message):
+                return
 
-        # Debug log the message content and attachments
-        logger.info(f"Message received: {message.content}")
-        logger.info(f"Has attachments: {len(message.attachments) > 0}")
-        
-        # Check if it's a valid drink check (requires 'dc' + attachment)
-        is_drink_check = self.tracker.is_drink_check(message.content, message)
-        if is_drink_check:
-            logger.info("Valid drink check detected")
-            await self._process_drink_check(message)
+            # Debug log the message content and attachments
+            logger.info(f"Processing message in channel {message.channel.id}: {message.content}")
+            logger.info(f"Has attachments: {len(message.attachments) > 0}")
+            
+            # Check if it's a valid drink check (requires 'dc' + attachment)
+            is_drink_check = self.tracker.is_drink_check(message.content, message)
+            logger.info(f"Is drink check: {is_drink_check}")
+            
+            if is_drink_check:
+                logger.info("Valid drink check detected")
+                await self._process_drink_check(message)
+                
+            # Cleanup cache periodically
+            self._cleanup_cache()
+        except Exception as e:
+            logger.error(f"Error processing message: {e}", exc_info=True)
 
     async def _get_or_create_user(self, db, user_id, username):
-        """Get or create a user in the database."""
+        """Get user from cache or create in database."""
+        # Check cache first
+        if user_id in self.user_cache:
+            return self.user_cache[user_id]
+
+        # If not in cache, get from database
         user = db.query(User).filter_by(user_id=user_id).first()
         if not user:
             user = User(user_id=user_id, username=username, total_credits=0)
             db.add(user)
             db.commit()
+            
+        # Add to cache
+        self.user_cache[user_id] = user
         return user
 
     async def _get_active_chain(self, db):
@@ -161,5 +218,7 @@ class MessageEvents(commands.Cog):
             raise
 
 async def setup(bot):
-    await bot.add_cog(MessageEvents(bot))
+    cog = MessageEvents(bot)
+    await cog.setup_channels()  # Initialize tracked channels
+    await bot.add_cog(cog)
     return True

@@ -5,7 +5,6 @@ from config.settings import TRACKED_CHANNELS
 class DrinkCheckTracker:
     def __init__(self, database=None):
         self.keywords = ["drink check", "dc"]
-        self.tracked_channels = TRACKED_CHANNELS  # Use channels from config
         self.database = database
         
     def is_drink_check(self, content: str, message=None) -> bool:

@@ -16,8 +16,10 @@ DATABASE_PATH = os.getenv('DATABASE_PATH', 'drink_check_bot.db')
 # Bot Configuration
 BOT_PREFIX = os.getenv('BOT_PREFIX', '!')
 
-# Channel Configuration
-TRACKED_CHANNELS = os.getenv('TRACKED_CHANNELS', '').split(',') if os.getenv('TRACKED_CHANNELS') else []
+# Get tracked channels from environment
+# Convert comma-separated string of channel IDs to list of integers
+TRACKED_CHANNELS_STR = os.getenv('TRACKED_CHANNELS', '')
+TRACKED_CHANNELS = [int(channel_id.strip()) for channel_id in TRACKED_CHANNELS_STR.split(',') if channel_id.strip()]
 
 # Bot permissions and intents
 REQUIRED_PERMISSIONS = [
@@ -26,3 +28,6 @@ REQUIRED_PERMISSIONS = [
     'use_slash_commands',
     'add_reactions'
 ]
+
+# Chain settings
+CHAIN_TIMEOUT_MINUTES = 30  # How long until a chain expires
