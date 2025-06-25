@@ -21,7 +21,7 @@ class User(Base):
     user_id = Column(BigInteger, primary_key=True)
     username = Column(String(255))
     total_credits = Column(Integer, default=0)
-    longest_chain_participation = Column(Integer, default=0)  # Longest chain they were part of
+    longest_chain_streak = Column(Integer, default=0)  # Longest chain they were part of (in total messages)
     
     # Relationships
     drink_checks = relationship("DrinkCheck", back_populates="user")
@@ -75,10 +75,9 @@ class ActiveChain(Base):
     start_time = Column(DateTime(timezone=True))
     last_activity = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
-    unique_participants_count = Column(Integer, default=1)  # Count of unique participants
-    participant_ids = Column(String(1000), default='')  # Comma-separated list of participant IDs
+    total_messages = Column(Integer, default=1)  # Total messages in chain
     is_server_record = Column(Boolean, default=False)  # Whether this chain set a server record
-    
+
     # Relationships
     drink_checks = relationship("DrinkCheck", back_populates="chain")
 
@@ -98,17 +97,3 @@ class ActiveChain(Base):
         
         # Chain expires after 30 minutes of inactivity
         return (now - last_activity_utc) > timedelta(minutes=30)
-
-    def get_participants(self) -> set:
-        """Get set of participant IDs"""
-        return set(int(id) for id in self.participant_ids.split(',') if id)
-
-    def add_participant(self, user_id: int) -> bool:
-        """Add a participant to the chain. Returns True if this is a new participant."""
-        participants = self.get_participants()
-        if user_id not in participants:
-            participants.add(user_id)
-            self.participant_ids = ','.join(str(id) for id in participants)
-            self.unique_participants_count = len(participants)
-            return True
-        return False

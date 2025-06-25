@@ -133,8 +133,7 @@ class MessageEvents(commands.Cog):
             last_message_author_id=user_id,
             start_time=now,
             last_activity=now,
-            unique_participants_count=1,
-            participant_ids=str(user_id)  # Initialize with starter
+            total_messages=1  # Start with 1 message
         )
         db.add(new_chain)
         db.commit()
@@ -187,9 +186,6 @@ class MessageEvents(commands.Cog):
                     # Active chain exists - add to it
                     drink_check.chain_id = active_chain.chain_id
                     
-                    # Check if this is a new participant
-                    is_new_participant = active_chain.add_participant(message.author.id)
-                    
                     # Award chain credit
                     credit = Credit(
                         user_id=message.author.id,
@@ -204,42 +200,43 @@ class MessageEvents(commands.Cog):
                     active_chain.last_message_id = message.id
                     active_chain.last_message_author_id = message.author.id
                     active_chain.last_activity = now
+                    active_chain.total_messages += 1
                     
-                    if is_new_participant:
-                        # Check if this chain sets a new record
-                        current_record = db.query(ActiveChain)\
-                            .filter_by(is_server_record=True)\
-                            .with_entities(ActiveChain.unique_participants_count)\
-                            .first()
+                    # Check if this chain sets a new record
+                    current_record = db.query(ActiveChain)\
+                        .filter_by(is_server_record=True)\
+                        .with_entities(ActiveChain.total_messages)\
+                        .first()
+                    
+                    current_record_count = current_record[0] if current_record else 0
+                    
+                    if active_chain.total_messages > current_record_count:
+                        # New server record!
+                        active_chain.is_server_record = True
+                        # Update old record holder
+                        if current_record:
+                            db.query(ActiveChain)\
+                                .filter_by(is_server_record=True)\
+                                .filter(ActiveChain.chain_id != active_chain.chain_id)\
+                                .update({"is_server_record": False})
                         
-                        current_record_count = current_record[0] if current_record else 0
-                        
-                        if active_chain.unique_participants_count > current_record_count:
-                            # New server record!
-                            active_chain.is_server_record = True
-                            # Update old record holder
-                            if current_record:
-                                db.query(ActiveChain)\
-                                    .filter_by(is_server_record=True)\
-                                    .filter(ActiveChain.chain_id != active_chain.chain_id)\
-                                    .update({"is_server_record": False})
-                            
-                            await message.channel.send(
-                                f"🏆 **New Server Record!**\n"
-                                f"This chain now has {active_chain.unique_participants_count} unique participants!"
-                            )
-                        
-                        # Update user's personal best if needed
-                        if active_chain.unique_participants_count > user.longest_chain_participation:
-                            user.longest_chain_participation = active_chain.unique_participants_count
-                            
-                        # Send new participant message
                         await message.channel.send(
-                            f"➕ {message.author.mention} joined the chain!\n"
-                            f"Current participants: {active_chain.unique_participants_count}"
+                            f"🏆 **New Server Record!**\n"
+                            f"This chain now has {active_chain.total_messages} drink checks!"
                         )
                     
-                    logger.info(f"Added to existing chain, participants: {active_chain.unique_participants_count}")
+                    # Update user's personal best if needed
+                    if active_chain.total_messages > user.longest_chain_streak:
+                        user.longest_chain_streak = active_chain.total_messages
+                    
+                    # Send chain update message every 5 messages
+                    if active_chain.total_messages % 5 == 0:
+                        await message.channel.send(
+                            f"🔗 Chain Update!\n"
+                            f"Current streak: {active_chain.total_messages} drink checks"
+                        )
+                    
+                    logger.info(f"Added to existing chain, total messages: {active_chain.total_messages}")
 
                 db.commit()
                 logger.info("Successfully committed all database changes")

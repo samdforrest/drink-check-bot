@@ -100,8 +100,8 @@ class StatsCommands(commands.Cog):
                 
                 # Add chain stats
                 embed.add_field(
-                    name="Longest Chain Participation",
-                    value=f"{db_user.longest_chain_participation:,} participants",
+                    name="Longest Chain Streak",
+                    value=f"{db_user.longest_chain_streak:,} drink checks",
                     inline=True
                 )
                 embed.add_field(
@@ -137,12 +137,6 @@ class StatsCommands(commands.Cog):
                     .limit(10)\
                     .all()
                 
-                # Get top 10 users by longest chain participation
-                top_chains = db.query(User)\
-                    .order_by(User.longest_chain_participation.desc())\
-                    .limit(10)\
-                    .all()
-                
                 # Get server record
                 server_record = db.query(ActiveChain)\
                     .filter_by(is_server_record=True)\
@@ -163,29 +157,15 @@ class StatsCommands(commands.Cog):
 
                 # Add server record if it exists
                 if server_record:
+                    # Get the starter's username
+                    starter = db.query(User).filter_by(user_id=server_record.starter_id).first()
+                    starter_name = starter.username if starter else "Unknown"
+                    
                     embed.add_field(
                         name="Server Record Chain",
-                        value=f"🏅 {server_record.unique_participants_count} participants",
+                        value=f"🏅 {server_record.total_messages} drink checks\nStarted by: {starter_name}",
                         inline=False
                     )
-
-                # Add empty field for spacing
-                embed.add_field(
-                    name="\u200b",
-                    value="\u200b",
-                    inline=False
-                )
-
-                # Format top chains at the bottom
-                chains_text = "\n".join(
-                    f"{idx+1}. {user.username}: {user.longest_chain_participation} participants"
-                    for idx, user in enumerate(top_chains)
-                )
-                embed.add_field(
-                    name="Longest Chain Participation",
-                    value=chains_text or "No data",
-                    inline=False
-                )
 
                 await interaction.response.send_message(embed=embed)
 
