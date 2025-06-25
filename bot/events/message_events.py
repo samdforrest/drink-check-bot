@@ -180,7 +180,15 @@ class MessageEvents(commands.Cog):
                     logger.info(f"Started new chain, awarded initial credit to {message.author.name}")
                     
                     # Send chain start message
-                    await message.channel.send(f"🔗 New chain started by {message.author.mention}!")
+                    try:
+                        # Create a temporary message that only the chain starter can see
+                        await message.channel.send(
+                            f"🔗 You started a new drink check chain!",
+                            delete_after=20,  # Message will auto-delete after 10 seconds
+                            reference=message  # Reference the original message
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send chain start message: {e}")
                 
                 else:
                     # Active chain exists - add to it
