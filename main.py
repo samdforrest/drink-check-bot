@@ -7,6 +7,7 @@ from bot.stats import StatsManager
 from bot.database import Database
 from commands.stats import StatsCommands
 from commands.admin import AdminCommands
+from commands.help import HelpCommands
 from config.settings import DISCORD_TOKEN, TRACKED_CHANNELS
 import os
 import logging
@@ -47,6 +48,7 @@ class DrinkCheckBot(commands.Bot):
         await self.load_extension('bot.events.message_events')
         await self.load_extension('commands.stats')
         await self.load_extension('commands.admin')  # Load admin commands
+        await self.load_extension('commands.help')  # Load help commands
         logger.info("Extensions loaded")
     
     async def on_ready(self):

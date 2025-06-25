@@ -32,6 +32,7 @@ class DrinkCheckBot(commands.Bot):
         # Load all cogs
         await self.load_extension('bot.events.message_events')
         await self.load_extension('commands.stats')
+        await self.load_extension('commands.help')
         logger.info("Extensions loaded")
     
     async def on_ready(self):
