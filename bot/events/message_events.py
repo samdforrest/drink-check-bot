@@ -40,7 +40,6 @@ class MessageEvents(commands.Cog):
         """Quick check if message should be processed"""
         # Ignore bot messages
         if message.author.bot:
-            logger.debug("Ignoring bot message")
             return False
             
         # If no channel restrictions, process all
@@ -48,16 +47,12 @@ class MessageEvents(commands.Cog):
             return True
             
         # Check if message is in allowed channel
-        is_allowed = message.channel.id in self.allowed_channels
-        if not is_allowed:
-            logger.debug(f"Channel {message.channel.id} not in tracked channels")
-        return is_allowed
+        return message.channel.id in self.allowed_channels
 
     def _cleanup_cache(self):
         """Clean up expired cache entries"""
         now = datetime.utcnow()
         if (now - self.last_cache_cleanup).total_seconds() > 3600:  # Cleanup every hour
-            logger.info("Cleaning up user cache")
             self.user_cache.clear()
             self.last_cache_cleanup = now
 
@@ -68,16 +63,12 @@ class MessageEvents(commands.Cog):
             if not self._should_process_message(message):
                 return
 
-            # Debug log the message content and attachments
-            logger.info(f"Processing message in channel {message.channel.id}: {message.content}")
-            logger.info(f"Has attachments: {len(message.attachments) > 0}")
-            
-            # Check if it's a valid drink check (requires 'dc' + attachment)
+            # Check if it's a valid drink check
             is_drink_check = self.tracker.is_drink_check(message.content, message)
-            logger.info(f"Is drink check: {is_drink_check}")
+            #logger.info(f"Is drink check: {is_drink_check}")
             
             if is_drink_check:
-                logger.info("Valid drink check detected")
+                #logger.info("Valid drink check detected")
                 await self._process_drink_check(message)
                 
             # Cleanup cache periodically
@@ -141,8 +132,6 @@ class MessageEvents(commands.Cog):
 
     async def _process_drink_check(self, message: Message):
         """Process a drink check message and award credits."""
-        logger.info(f"Processing drink check for user: {message.author.name}")
-        
         try:
             with DatabaseSession() as db:
                 # Get or create user
@@ -243,11 +232,9 @@ class MessageEvents(commands.Cog):
                             f"🔗 Chain Update!\n"
                             f"Current streak: {active_chain.total_messages} drink checks"
                         )
-                    
-                    logger.info(f"Added to existing chain, total messages: {active_chain.total_messages}")
 
                 db.commit()
-                logger.info("Successfully committed all database changes")
+                #logger.info("Successfully committed all database changes")
                 
                 # Add reaction to confirm credit
                 await message.add_reaction('🍺')

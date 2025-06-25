@@ -20,9 +20,16 @@ load_dotenv()
 # Set up logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Console handler
+    ]
 )
 logger = logging.getLogger(__name__)
+
+# Reduce logging from frequently triggered events
+logging.getLogger('discord.gateway').setLevel(logging.WARNING)
+logging.getLogger('discord.client').setLevel(logging.WARNING)
 
 class DrinkCheckBot(commands.Bot):
     def __init__(self):
