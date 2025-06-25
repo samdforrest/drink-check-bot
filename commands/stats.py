@@ -19,7 +19,7 @@ central = pytz.timezone('America/Chicago')
 
 class LeaderboardView(discord.ui.View):
     def __init__(self, users: List[User], server_record: Optional[ActiveChain], starter_name: Optional[str]):
-        super().__init__(timeout=180)  # 3 minute timeout
+        super().__init__(timeout=None)  # No timeout to keep buttons always active
         self.users = users
         self.server_record = server_record
         self.starter_name = starter_name
@@ -28,7 +28,7 @@ class LeaderboardView(discord.ui.View):
 
     @property
     def max_pages(self):
-        return (len(self.users) - 1) // self.users_per_page
+        return max(0, (len(self.users) - 1) // self.users_per_page)
 
     def get_embed(self) -> discord.Embed:
         start_idx = self.current_page * self.users_per_page
@@ -47,7 +47,8 @@ class LeaderboardView(discord.ui.View):
         embed.description = credits_text or "No data"
 
         # Add page number
-        embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_pages + 1}")
+        if self.max_pages > 0:
+            embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_pages + 1}")
 
         # Add server record if it exists
         if self.server_record:
@@ -59,13 +60,14 @@ class LeaderboardView(discord.ui.View):
 
         return embed
 
-    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray, disabled=True)
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray)
     async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
         self.current_page = max(0, self.current_page - 1)
         
         # Update button states
-        self.previous_button.disabled = self.current_page == 0
-        self.next_button.disabled = self.current_page == self.max_pages
+        button.disabled = self.current_page == 0
+        next_button = [x for x in self.children if x.label == "Next"][0]
+        next_button.disabled = self.current_page >= self.max_pages
         
         await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
@@ -74,10 +76,22 @@ class LeaderboardView(discord.ui.View):
         self.current_page = min(self.max_pages, self.current_page + 1)
         
         # Update button states
-        self.previous_button.disabled = self.current_page == 0
-        self.next_button.disabled = self.current_page == self.max_pages
+        button.disabled = self.current_page >= self.max_pages
+        prev_button = [x for x in self.children if x.label == "Previous"][0]
+        prev_button.disabled = self.current_page == 0
         
         await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    async def start(self, interaction: discord.Interaction):
+        """Initial setup of the view"""
+        # Set initial button states
+        prev_button = [x for x in self.children if x.label == "Previous"][0]
+        next_button = [x for x in self.children if x.label == "Next"][0]
+        
+        prev_button.disabled = self.current_page == 0
+        next_button.disabled = self.max_pages == 0
+        
+        await interaction.response.send_message(embed=self.get_embed(), view=self)
 
 class StatsCommands(commands.Cog):
     def __init__(self, bot):
@@ -234,6 +248,10 @@ class StatsCommands(commands.Cog):
                     .order_by(User.total_credits.desc())\
                     .all()
                 
+                if not users:
+                    await interaction.response.send_message("No leaderboard data available yet!", ephemeral=True)
+                    return
+
                 # Get server record
                 server_record = db.query(ActiveChain)\
                     .filter_by(is_server_record=True)\
@@ -245,11 +263,9 @@ class StatsCommands(commands.Cog):
                     starter = db.query(User).filter_by(user_id=server_record.starter_id).first()
                     starter_name = starter.username if starter else "Unknown"
 
-                # Create the view with the data
+                # Create and start the view
                 view = LeaderboardView(users, server_record, starter_name)
-                
-                # Send the initial embed with the view
-                await interaction.response.send_message(embed=view.get_embed(), view=view)
+                await view.start(interaction)
 
         except Exception as e:
             logger.error(f"Error in leaderboard command: {e}")
