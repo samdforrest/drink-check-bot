@@ -8,6 +8,7 @@ from sqlalchemy import func, text
 from datetime import datetime, timedelta
 import pytz
 import logging
+from typing import List, Optional
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -15,6 +16,68 @@ logger = logging.getLogger(__name__)
 
 # Set up Central timezone
 central = pytz.timezone('America/Chicago')
+
+class LeaderboardView(discord.ui.View):
+    def __init__(self, users: List[User], server_record: Optional[ActiveChain], starter_name: Optional[str]):
+        super().__init__(timeout=180)  # 3 minute timeout
+        self.users = users
+        self.server_record = server_record
+        self.starter_name = starter_name
+        self.current_page = 0
+        self.users_per_page = 10
+
+    @property
+    def max_pages(self):
+        return (len(self.users) - 1) // self.users_per_page
+
+    def get_embed(self) -> discord.Embed:
+        start_idx = self.current_page * self.users_per_page
+        page_users = self.users[start_idx:start_idx + self.users_per_page]
+
+        embed = discord.Embed(
+            title="🏆 Drink Check Leaderboard",
+            color=discord.Color.gold()
+        )
+
+        # Format top credits (main leaderboard)
+        credits_text = "\n".join(
+            f"{start_idx + idx + 1}. {user.username} 🍺 {user.total_credits}"
+            for idx, user in enumerate(page_users)
+        )
+        embed.description = credits_text or "No data"
+
+        # Add page number
+        embed.set_footer(text=f"Page {self.current_page + 1}/{self.max_pages + 1}")
+
+        # Add server record if it exists
+        if self.server_record:
+            embed.add_field(
+                name="Server Record Chain",
+                value=f"🏅 {self.server_record.total_messages} drink checks\nStarted by: {self.starter_name}",
+                inline=False
+            )
+
+        return embed
+
+    @discord.ui.button(label="Previous", style=discord.ButtonStyle.gray, disabled=True)
+    async def previous_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = max(0, self.current_page - 1)
+        
+        # Update button states
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page == self.max_pages
+        
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.gray)
+    async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.current_page = min(self.max_pages, self.current_page + 1)
+        
+        # Update button states
+        self.previous_button.disabled = self.current_page == 0
+        self.next_button.disabled = self.current_page == self.max_pages
+        
+        await interaction.response.edit_message(embed=self.get_embed(), view=self)
 
 class StatsCommands(commands.Cog):
     def __init__(self, bot):
@@ -166,10 +229,9 @@ class StatsCommands(commands.Cog):
         try:
             logger.info("Fetching leaderboard data")
             with DatabaseSession() as db:
-                # Get top 10 users by total credits
-                top_credits = db.query(User)\
+                # Get all users ordered by total credits
+                users = db.query(User)\
                     .order_by(User.total_credits.desc())\
-                    .limit(10)\
                     .all()
                 
                 # Get server record
@@ -177,32 +239,17 @@ class StatsCommands(commands.Cog):
                     .filter_by(is_server_record=True)\
                     .first()
 
-                # Create embed
-                embed = discord.Embed(
-                    title="🏆 Drink Check Leaderboard",
-                    color=discord.Color.gold()
-                )
-
-                # Format top credits (main leaderboard)
-                credits_text = "\n".join(
-                    f"{idx+1}. {user.username} 🍺 {user.total_credits}"
-                    for idx, user in enumerate(top_credits)
-                )
-                embed.description = credits_text or "No data"
-
-                # Add server record if it exists
+                # Get the starter's username if server record exists
+                starter_name = "Unknown"
                 if server_record:
-                    # Get the starter's username
                     starter = db.query(User).filter_by(user_id=server_record.starter_id).first()
                     starter_name = starter.username if starter else "Unknown"
-                    
-                    embed.add_field(
-                        name="Server Record Chain",
-                        value=f"🏅 {server_record.total_messages} drink checks\nStarted by: {starter_name}",
-                        inline=False
-                    )
 
-                await interaction.response.send_message(embed=embed)
+                # Create the view with the data
+                view = LeaderboardView(users, server_record, starter_name)
+                
+                # Send the initial embed with the view
+                await interaction.response.send_message(embed=view.get_embed(), view=view)
 
         except Exception as e:
             logger.error(f"Error in leaderboard command: {e}")
