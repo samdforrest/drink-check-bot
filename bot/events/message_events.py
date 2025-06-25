@@ -116,14 +116,14 @@ class MessageEvents(commands.Cog):
             
         return active_chain
 
-    async def _create_new_chain(self, db, message_id, user_id):
+    async def _create_new_chain(self, db, message_id: int, user_id: int) -> ActiveChain:
         """Create a new chain and deactivate any existing ones."""
         # Deactivate any existing chains
         db.query(ActiveChain)\
             .filter_by(is_active=True)\
             .update({"is_active": False})
         
-        # Create new chain with current time in Central Time
+        # Create new chain with current time in UTC
         now = datetime.utcnow().replace(tzinfo=pytz.UTC)
         
         new_chain = ActiveChain(
@@ -132,7 +132,9 @@ class MessageEvents(commands.Cog):
             last_message_id=message_id,
             last_message_author_id=user_id,
             start_time=now,
-            last_activity=now
+            last_activity=now,
+            unique_participants_count=1,
+            participant_ids=str(user_id)  # Initialize with starter
         )
         db.add(new_chain)
         db.commit()
@@ -150,7 +152,7 @@ class MessageEvents(commands.Cog):
                 # Check for active chain
                 active_chain = await self._get_active_chain(db)
                 
-                # Create drink check record with current time in Central Time
+                # Create drink check record with current time in UTC
                 now = datetime.utcnow().replace(tzinfo=pytz.UTC)
                 
                 drink_check = DrinkCheck(
@@ -177,35 +179,67 @@ class MessageEvents(commands.Cog):
                     db.add(credit)
                     user.total_credits += 1
                     logger.info(f"Started new chain, awarded initial credit to {message.author.name}")
+                    
+                    # Send chain start message
+                    await message.channel.send(f"🔗 New chain started by {message.author.mention}!")
                 
                 else:
                     # Active chain exists - add to it
                     drink_check.chain_id = active_chain.chain_id
-                    is_chain_starter = message.author.id == active_chain.starter_id
-                    is_self_reply = message.author.id == active_chain.last_message_author_id
                     
-                    # Award chain credit to participant
-                    chain_credit = Credit(
+                    # Check if this is a new participant
+                    is_new_participant = active_chain.add_participant(message.author.id)
+                    
+                    # Award chain credit
+                    credit = Credit(
                         user_id=message.author.id,
                         message_id=message.id,
                         credit_type='chain',
                         timestamp=now
                     )
-                    db.add(chain_credit)
+                    db.add(credit)
                     user.total_credits += 1
                     
-                    
-                    
-                    # Update chain's last message info
+                    # Update chain's last message info and activity
                     active_chain.last_message_id = message.id
                     active_chain.last_message_author_id = message.author.id
+                    active_chain.last_activity = now
                     
-                    # Only update last_activity (timer) if it's not a self-reply or same person
-                    if not is_self_reply and not is_chain_starter:
-                        active_chain.last_activity = now
-                        logger.info("Chain timer reset")
-                    else:
-                        logger.info("Self-reply or starter drink check - timer not reset")
+                    if is_new_participant:
+                        # Check if this chain sets a new record
+                        current_record = db.query(ActiveChain)\
+                            .filter_by(is_server_record=True)\
+                            .with_entities(ActiveChain.unique_participants_count)\
+                            .first()
+                        
+                        current_record_count = current_record[0] if current_record else 0
+                        
+                        if active_chain.unique_participants_count > current_record_count:
+                            # New server record!
+                            active_chain.is_server_record = True
+                            # Update old record holder
+                            if current_record:
+                                db.query(ActiveChain)\
+                                    .filter_by(is_server_record=True)\
+                                    .filter(ActiveChain.chain_id != active_chain.chain_id)\
+                                    .update({"is_server_record": False})
+                            
+                            await message.channel.send(
+                                f"🏆 **New Server Record!**\n"
+                                f"This chain now has {active_chain.unique_participants_count} unique participants!"
+                            )
+                        
+                        # Update user's personal best if needed
+                        if active_chain.unique_participants_count > user.longest_chain_participation:
+                            user.longest_chain_participation = active_chain.unique_participants_count
+                            
+                        # Send new participant message
+                        await message.channel.send(
+                            f"➕ {message.author.mention} joined the chain!\n"
+                            f"Current participants: {active_chain.unique_participants_count}"
+                        )
+                    
+                    logger.info(f"Added to existing chain, participants: {active_chain.unique_participants_count}")
 
                 db.commit()
                 logger.info("Successfully committed all database changes")

@@ -63,96 +63,57 @@ class StatsCommands(commands.Cog):
                 today_start_utc = today_start.astimezone(pytz.UTC)
                 today_end_utc = today_end.astimezone(pytz.UTC)
                 
-                today_dcs = db.query(func.count(DrinkCheck.message_id))\
-                    .filter(
-                        DrinkCheck.user_id == target_user.id,
-                        DrinkCheck.timestamp >= today_start_utc,
-                        DrinkCheck.timestamp <= today_end_utc
-                    ).scalar() or 0
+                # Get today's stats
+                today_dcs = db.query(func.count(Credit.credit_id))\
+                    .filter(Credit.user_id == target_user.id,
+                           Credit.timestamp >= today_start_utc,
+                           Credit.timestamp <= today_end_utc)\
+                    .scalar() or 0
 
-                # Get yesterday's drink checks
-                yesterday = today - timedelta(days=1)
-                yesterday_start = central.localize(datetime.combine(yesterday, datetime.min.time()))
-                yesterday_end = central.localize(datetime.combine(yesterday, datetime.max.time()))
-                
-                # Convert to UTC for database query
-                yesterday_start_utc = yesterday_start.astimezone(pytz.UTC)
-                yesterday_end_utc = yesterday_end.astimezone(pytz.UTC)
-                
-                yesterday_dcs = db.query(func.count(DrinkCheck.message_id))\
-                    .filter(
-                        DrinkCheck.user_id == target_user.id,
-                        DrinkCheck.timestamp >= yesterday_start_utc,
-                        DrinkCheck.timestamp <= yesterday_end_utc
-                    ).scalar() or 0
-
-                # Get highest daily count using SQLite's date() function and timezone conversion
-                # First convert the timestamp to Central Time using strftime
-                daily_counts = db.query(
-                    func.strftime('%Y-%m-%d', DrinkCheck.timestamp).label('date'),
-                    func.count(DrinkCheck.message_id).label('count')
-                ).filter(
-                    DrinkCheck.user_id == target_user.id
-                ).group_by(
-                    func.strftime('%Y-%m-%d', DrinkCheck.timestamp)
-                ).order_by(
-                    func.count(DrinkCheck.message_id).desc()
-                ).first()
-
-                highest_daily = daily_counts[1] if daily_counts else 0
-                highest_date = daily_counts[0] if daily_counts else None
-
-                logger.info(f"Stats for {target_user.name}: initial={initial_dcs}, chain={chain_dcs}, today={today_dcs}")
+                # Check if user holds any server records
+                has_record = db.query(ActiveChain)\
+                    .filter_by(starter_id=target_user.id, is_server_record=True)\
+                    .first() is not None
 
                 # Create embed
                 embed = discord.Embed(
-                    title=f"🍺 Drink Check Profile: {target_user.name}",
-                    color=discord.Color.gold()
+                    title=f"🍺 DrinkCheck Profile for {target_user.name}",
+                    color=discord.Color.blue()
                 )
                 
+                # Add stats fields
                 embed.add_field(
                     name="Total Credits",
-                    value=f"🍺 {db_user.total_credits}",
-                    inline=False
-                )
-                
-                embed.add_field(
-                    name="Initial Drink Checks",
-                    value=f"📝 {initial_dcs}",
+                    value=f"{db_user.total_credits:,}",
                     inline=True
                 )
-                
+                embed.add_field(
+                    name="Chains Started",
+                    value=f"{initial_dcs:,}",
+                    inline=True
+                )
                 embed.add_field(
                     name="Chain Participations",
-                    value=f"⛓️ {chain_dcs}",
+                    value=f"{chain_dcs:,}",
                     inline=True
                 )
-
-                # Add daily stats section
+                
+                # Add chain stats
                 embed.add_field(
-                    name="\u200b",  # Empty field for spacing
-                    value="\u200b",
-                    inline=False
-                )
-
-                embed.add_field(
-                    name="Today's Drink Checks (CT)",
-                    value=f"📅 {today_dcs}",
+                    name="Longest Chain Participation",
+                    value=f"{db_user.longest_chain_participation:,} participants",
                     inline=True
                 )
-
                 embed.add_field(
-                    name="Yesterday's Drink Checks (CT)",
-                    value=f"📅 {yesterday_dcs}",
+                    name="Server Record Holder",
+                    value="🏆 Yes" if has_record else "No",
                     inline=True
                 )
-
-                if highest_date:
-                    embed.add_field(
-                        name="Most Active Day (CT)",
-                        value=f"🏆 {highest_daily} checks on {highest_date}",
-                        inline=False
-                    )
+                embed.add_field(
+                    name="Today's Drink Checks",
+                    value=f"{today_dcs:,}",
+                    inline=True
+                )
                 
                 # Add user avatar
                 embed.set_thumbnail(url=target_user.display_avatar.url)
@@ -162,7 +123,7 @@ class StatsCommands(commands.Cog):
         except Exception as e:
             logger.error(f"Error in profile command: {e}")
             await interaction.response.send_message("Error getting profile information.", ephemeral=True)
-            raise  # Add this to see the full error trace in logs
+            raise
     
     @app_commands.command(name="leaderboard", description="View the drink check leaderboard")
     async def leaderboard(self, interaction: discord.Interaction):
@@ -170,40 +131,68 @@ class StatsCommands(commands.Cog):
         try:
             logger.info("Fetching leaderboard data")
             with DatabaseSession() as db:
-                # Get top 10 users
-                top_users = db.query(User)\
+                # Get top 10 users by total credits
+                top_credits = db.query(User)\
                     .order_by(User.total_credits.desc())\
                     .limit(10)\
                     .all()
                 
-                logger.info(f"Found {len(top_users)} users for leaderboard")
+                # Get top 10 users by longest chain participation
+                top_chains = db.query(User)\
+                    .order_by(User.longest_chain_participation.desc())\
+                    .limit(10)\
+                    .all()
                 
-                if not top_users:
-                    logger.info("No users found in database")
-                    await interaction.response.send_message("No drink checks recorded yet!", ephemeral=True)
-                    return
-                
+                # Get server record
+                server_record = db.query(ActiveChain)\
+                    .filter_by(is_server_record=True)\
+                    .first()
+
                 # Create embed
                 embed = discord.Embed(
                     title="🏆 Drink Check Leaderboard",
                     color=discord.Color.gold()
                 )
-                
-                # Add leaderboard entries
-                leaderboard_text = ""
-                for i, user in enumerate(top_users, 1):
-                    member = interaction.guild.get_member(user.user_id)
-                    name = member.name if member else user.username
-                    leaderboard_text += f"`{i}.` {name:<20} 🍺 {user.total_credits}\n"
-                    logger.info(f"Leaderboard entry {i}: {name} with {user.total_credits} credits")
-                
-                embed.description = leaderboard_text
-                
+
+                # Format top credits (main leaderboard)
+                credits_text = "\n".join(
+                    f"{idx+1}. {user.username} 🍺 {user.total_credits}"
+                    for idx, user in enumerate(top_credits)
+                )
+                embed.description = credits_text or "No data"
+
+                # Add server record if it exists
+                if server_record:
+                    embed.add_field(
+                        name="Server Record Chain",
+                        value=f"🏅 {server_record.unique_participants_count} participants",
+                        inline=False
+                    )
+
+                # Add empty field for spacing
+                embed.add_field(
+                    name="\u200b",
+                    value="\u200b",
+                    inline=False
+                )
+
+                # Format top chains at the bottom
+                chains_text = "\n".join(
+                    f"{idx+1}. {user.username}: {user.longest_chain_participation} participants"
+                    for idx, user in enumerate(top_chains)
+                )
+                embed.add_field(
+                    name="Longest Chain Participation",
+                    value=chains_text or "No data",
+                    inline=False
+                )
+
                 await interaction.response.send_message(embed=embed)
-                
+
         except Exception as e:
-            logger.error(f"Error in leaderboard command: {e}", exc_info=True)
-            await interaction.response.send_message("Error getting leaderboard.", ephemeral=True)
+            logger.error(f"Error in leaderboard command: {e}")
+            await interaction.response.send_message("Error fetching leaderboard data.", ephemeral=True)
+            raise
 
     @app_commands.command(name="timer", description="Check how much time is left in the current drink check chain")
     async def timer(self, interaction: discord.Interaction):
