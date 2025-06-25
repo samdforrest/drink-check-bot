@@ -54,67 +54,102 @@ class StatsCommands(commands.Cog):
                 # Get current time in Central Time
                 now = datetime.utcnow().replace(tzinfo=pytz.UTC).astimezone(central)
                 today = now.date()
+                yesterday = today - timedelta(days=1)
                 
                 # Create datetime ranges in Central Time
                 today_start = central.localize(datetime.combine(today, datetime.min.time()))
                 today_end = central.localize(datetime.combine(today, datetime.max.time()))
+                yesterday_start = central.localize(datetime.combine(yesterday, datetime.min.time()))
+                yesterday_end = central.localize(datetime.combine(yesterday, datetime.max.time()))
                 
-                # Convert back to UTC for database query
+                # Convert to UTC for database queries
                 today_start_utc = today_start.astimezone(pytz.UTC)
                 today_end_utc = today_end.astimezone(pytz.UTC)
+                yesterday_start_utc = yesterday_start.astimezone(pytz.UTC)
+                yesterday_end_utc = yesterday_end.astimezone(pytz.UTC)
                 
-                # Get today's stats
+                # Get today's and yesterday's stats
                 today_dcs = db.query(func.count(Credit.credit_id))\
                     .filter(Credit.user_id == target_user.id,
                            Credit.timestamp >= today_start_utc,
                            Credit.timestamp <= today_end_utc)\
                     .scalar() or 0
 
-                # Check if user holds any server records
-                has_record = db.query(ActiveChain)\
-                    .filter_by(starter_id=target_user.id, is_server_record=True)\
-                    .first() is not None
+                yesterday_dcs = db.query(func.count(Credit.credit_id))\
+                    .filter(Credit.user_id == target_user.id,
+                           Credit.timestamp >= yesterday_start_utc,
+                           Credit.timestamp <= yesterday_end_utc)\
+                    .scalar() or 0
+
+                # Get most active day
+                daily_counts = db.query(
+                    func.strftime('%Y-%m-%d', Credit.timestamp).label('date'),
+                    func.count(Credit.credit_id).label('count')
+                ).filter(
+                    Credit.user_id == target_user.id
+                ).group_by(
+                    func.strftime('%Y-%m-%d', Credit.timestamp)
+                ).order_by(
+                    text('count DESC')
+                ).first()
 
                 # Create embed
                 embed = discord.Embed(
-                    title=f"🍺 DrinkCheck Profile for {target_user.name}",
-                    color=discord.Color.blue()
+                    title=f"🍺 Drink Check Profile: {target_user.name}",
+                    color=discord.Color.dark_theme()
                 )
                 
-                # Add stats fields
+                # Add main stats with emojis
                 embed.add_field(
                     name="Total Credits",
-                    value=f"{db_user.total_credits:,}",
-                    inline=True
+                    value=f"🍺 {db_user.total_credits}",
+                    inline=False
                 )
                 embed.add_field(
-                    name="Chains Started",
-                    value=f"{initial_dcs:,}",
+                    name="Initial Drink Checks",
+                    value=f"📝 {initial_dcs}",
                     inline=True
                 )
                 embed.add_field(
                     name="Chain Participations",
-                    value=f"{chain_dcs:,}",
+                    value=f"⛓️ {chain_dcs}",
                     inline=True
+                )
+
+                # Add empty field for spacing
+                embed.add_field(
+                    name="\u200b",
+                    value="\u200b",
+                    inline=False
                 )
                 
-                # Add chain stats
+                # Add today's and yesterday's stats
                 embed.add_field(
-                    name="Longest Chain Streak",
-                    value=f"{db_user.longest_chain_streak:,} drink checks",
+                    name="Today's Drink Checks (CT)",
+                    value=f"📅 {today_dcs}",
                     inline=True
                 )
                 embed.add_field(
-                    name="Server Record Holder",
-                    value="🏆 Yes" if has_record else "No",
+                    name="Yesterday's Drink Checks (CT)",
+                    value=f"📅 {yesterday_dcs}",
                     inline=True
                 )
+
+                # Add most active day if available
+                if daily_counts and daily_counts.count > 0:
+                    embed.add_field(
+                        name="Most Active Day (CT)",
+                        value=f"🏆 {daily_counts.count} checks on {daily_counts.date}",
+                        inline=False
+                    )
+
+                # Add streak information at the bottom
                 embed.add_field(
-                    name="Today's Drink Checks",
-                    value=f"{today_dcs:,}",
-                    inline=True
+                    name="\u200b",
+                    value=f"**Longest Streak**: 🍺 {db_user.longest_chain_streak}",
+                    inline=False
                 )
-                
+
                 # Add user avatar
                 embed.set_thumbnail(url=target_user.display_avatar.url)
                 
