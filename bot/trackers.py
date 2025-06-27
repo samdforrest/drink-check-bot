@@ -7,11 +7,12 @@ class DrinkCheckTracker:
         self.keywords = ["drink check", "dc"]
         self.database = database
         
-    def is_drink_check(self, content: str, message=None) -> bool:
+    def is_drink_check(self, content: str, message=None, active_chain=None) -> bool:
         """
         Check if a message is a valid drink check. Valid cases:
-        1. Normal message: Must have "dc" (or variant) AND attachment
-        2. Reply: Must have attachment (with or without "dc")
+        1. Normal message with no active chain: Must have "dc" (or variant) AND attachment
+        2. Message during active chain: Only needs attachment
+        3. Reply: Must have attachment (with or without "dc")
         """
         # Early return if no message object
         if not message:
@@ -27,7 +28,11 @@ class DrinkCheckTracker:
         if is_reply:
             return True  # Replies with attachments are always valid
 
-        # For non-replies, check for drink check keywords
+        # If there's an active chain, any message with attachment is valid
+        if active_chain:
+            return True
+
+        # For non-replies without active chain, check for drink check keywords
         content_lower = content.lower().strip()
         
         # Generate variations from the base keywords
@@ -44,7 +49,7 @@ class DrinkCheckTracker:
         # Check if content contains drink check keywords
         has_keywords = any(variation in content_lower for variation in variations)
         
-        # For non-replies, need both keywords AND attachment
+        # For non-replies without active chain, need both keywords AND attachment
         return has_keywords and has_attachment
         
     async def is_response_to_drink_check(self, message) -> Optional[int]:

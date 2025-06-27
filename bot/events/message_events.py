@@ -63,8 +63,12 @@ class MessageEvents(commands.Cog):
             if not self._should_process_message(message):
                 return
 
+            # Get active chain first
+            with DatabaseSession() as db:
+                active_chain = await self._get_active_chain(db)
+
             # Check if it's a valid drink check
-            is_drink_check = self.tracker.is_drink_check(message.content, message)
+            is_drink_check = self.tracker.is_drink_check(message.content, message, active_chain)
             #logger.info(f"Is drink check: {is_drink_check}")
             
             if is_drink_check:
