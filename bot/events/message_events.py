@@ -79,8 +79,11 @@ class MessageEvents(commands.Cog):
     async def _get_or_create_user(self, db, user_id, username):
         """Get user from cache or create in database."""
         # Check cache first
-        if user_id in self.user_cache:
-            return self.user_cache[user_id]
+        cached_user = self.user_cache.get(user_id)
+        if cached_user:
+            # Merge the cached instance with the current session
+            user = db.merge(cached_user)
+            return user
 
         # If not in cache, get from database
         user = db.query(User).filter_by(user_id=user_id).first()
