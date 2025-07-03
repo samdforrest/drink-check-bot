@@ -119,13 +119,9 @@ class StatsCommands(commands.Cog):
 
                 logger.info(f"Found user profile with {db_user.total_credits} total credits")
 
-                # Get detailed stats
-                initial_dcs = db.query(func.count(Credit.credit_id))\
-                    .filter_by(user_id=target_user.id, credit_type='initial')\
-                    .scalar() or 0
-                    
-                chain_dcs = db.query(func.count(Credit.credit_id))\
-                    .filter_by(user_id=target_user.id, credit_type='chain')\
+                # Get total drink check count (no distinction between types)
+                total_dcs = db.query(func.count(Credit.credit_id))\
+                    .filter_by(user_id=target_user.id)\
                     .scalar() or 0
 
                 # Get current time in Central Time
@@ -178,25 +174,8 @@ class StatsCommands(commands.Cog):
                 
                 # Add main stats with emojis
                 embed.add_field(
-                    name="Total Credits",
-                    value=f"🍺 {db_user.total_credits}",
-                    inline=False
-                )
-                embed.add_field(
-                    name="Initial Drink Checks",
-                    value=f"📝 {initial_dcs}",
-                    inline=True
-                )
-                embed.add_field(
-                    name="Chain Participations",
-                    value=f"⛓️ {chain_dcs}",
-                    inline=True
-                )
-
-                # Add empty field for spacing
-                embed.add_field(
-                    name="\u200b",
-                    value="\u200b",
+                    name="Total Drink Checks",
+                    value=f"🍺 {total_dcs}",
                     inline=False
                 )
                 
@@ -220,12 +199,7 @@ class StatsCommands(commands.Cog):
                         inline=False
                     )
 
-                # Add streak information at the bottom
-                embed.add_field(
-                    name="\u200b",
-                    value=f"**Longest Streak**: 🍺 {db_user.longest_chain_streak}",
-                    inline=False
-                )
+
 
                 # Add user avatar
                 embed.set_thumbnail(url=target_user.display_avatar.url)
