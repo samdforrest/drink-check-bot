@@ -352,6 +352,132 @@ class StatsCommands(commands.Cog):
             await interaction.response.send_message("Error checking chain timer.", ephemeral=True)
             raise
 
+    @app_commands.command(name="chain", description="Display information about the current drink check chain")
+    async def chain(self, interaction: discord.Interaction):
+        """Display detailed information about the current drink check chain"""
+        try:
+            logger.info("Fetching chain information")
+            with DatabaseSession() as db:
+                # Get the most recent chain (active or inactive)
+                current_chain = db.query(ActiveChain)\
+                    .order_by(ActiveChain.start_time.desc())\
+                    .first()
+                
+                if not current_chain:
+                    await interaction.response.send_message("🔗 No chains have been started yet! Start one with a drink check.", ephemeral=True)
+                    return
+                
+                # Get current time in UTC since our timestamps are in UTC
+                now = datetime.utcnow().replace(tzinfo=pytz.UTC)
+                
+                # Check if chain is expired
+                is_expired = current_chain.is_expired()
+                
+                # Convert chain timestamps to Central Time for display
+                start_time_ct = current_chain.start_time.astimezone(central)
+                last_activity_ct = current_chain.last_activity.astimezone(central)
+                
+                # Get starter's username
+                starter = db.query(User).filter_by(user_id=current_chain.starter_id).first()
+                starter_name = starter.username if starter else "Unknown"
+                
+                # Get last message author's username
+                last_author = db.query(User).filter_by(user_id=current_chain.last_message_author_id).first()
+                last_author_name = last_author.username if last_author else "Unknown"
+                
+                # Determine chain status and color
+                if current_chain.is_active and not is_expired:
+                    status = "🟢 Active"
+                    color = discord.Color.green()
+                elif current_chain.is_active and is_expired:
+                    status = "🟡 Expired (but not yet closed)"
+                    color = discord.Color.yellow()
+                else:
+                    status = "🔴 Closed"
+                    color = discord.Color.red()
+                
+                # Create embed
+                embed = discord.Embed(
+                    title="🔗 Current Chain Status",
+                    color=color
+                )
+                
+                # Add main chain info
+                embed.add_field(
+                    name="Chain Length",
+                    value=f"🍺 {current_chain.total_messages} drink checks",
+                    inline=False
+                )
+                
+                embed.add_field(
+                    name="Chain Starter",
+                    value=f"👑 {starter_name}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Last Participant",
+                    value=f"🎯 {last_author_name}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Status",
+                    value=status,
+                    inline=False
+                )
+                
+                # Add timing information
+                embed.add_field(
+                    name="Started (CT)",
+                    value=f"📅 {start_time_ct.strftime('%m/%d/%Y at %I:%M:%S %p')}",
+                    inline=True
+                )
+                
+                embed.add_field(
+                    name="Last Activity (CT)",
+                    value=f"📅 {last_activity_ct.strftime('%m/%d/%Y at %I:%M:%S %p')}",
+                    inline=True
+                )
+                
+                # Add time remaining if active
+                if current_chain.is_active and not is_expired:
+                    last_activity_utc = current_chain.last_activity.replace(tzinfo=pytz.UTC)
+                    time_diff = now - last_activity_utc
+                    minutes_left = 30 - (time_diff.total_seconds() / 60)
+                    
+                    embed.add_field(
+                        name="Time Remaining",
+                        value=f"⏰ {minutes_left:.1f} minutes",
+                        inline=False
+                    )
+                
+                # Add server record indicator if applicable
+                if current_chain.is_server_record:
+                    embed.add_field(
+                        name="🏆 Server Record",
+                        value="This chain set a new server record!",
+                        inline=False
+                    )
+                
+                # Calculate chain duration
+                # duration = current_chain.last_activity - current_chain.start_time
+                # hours = int(duration.total_seconds() // 3600)
+                # minutes = int((duration.total_seconds() % 3600) // 60)
+                
+                # embed.add_field(
+                #     name="Chain Duration",
+                #     value=f"⏱️ {hours}h {minutes}m",
+                #     inline=True
+                # )
+                
+                await interaction.response.send_message(embed=embed)
+                
+        except Exception as e:
+            logger.error(f"Error in chain command: {e}")
+            await interaction.response.send_message("Error fetching chain information.", ephemeral=True)
+            raise
+
 async def setup(bot):
     await bot.add_cog(StatsCommands(bot))
     return True
